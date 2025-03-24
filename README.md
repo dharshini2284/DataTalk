@@ -41,7 +41,7 @@ Built with **Streamlit**, **Hugging Face Transformers**, **BLIP**, and **FAISS**
 
 ## 👨‍💻 Author
 
-Made by [Dharshini]  
+Made by Dharshini
 
 ---
 
