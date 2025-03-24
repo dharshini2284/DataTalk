@@ -14,16 +14,20 @@ from sentence_transformers import SentenceTransformer
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Load models
-st.spinner("Loading SentenceTransformer...")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-qa_model = pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
+# ======================= Load Models Once =======================
+with st.spinner("Loading models..."):
+    embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    qa_model = pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
+    blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
+    blip_model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base").to("cpu")
+
+# ======================= Helper Functions =======================
 
 def extract_text(file, file_type):
     file_bytes = file.read()
 
     if file_type == "pdf":
-        import fitz
+        import fitz  # PyMuPDF
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         return "".join([page.get_text() for page in doc]), None
 
@@ -111,12 +115,10 @@ def handle_structured_question(df, question):
     return None
 
 def blip_answer(image_path, question):
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
-    model = BlipForQuestionAnswering.from_pretrained("Salesforce/blip-vqa-base").to("cpu")
     image = Image.open(image_path).convert("RGB")
-    inputs = processor(image, question, return_tensors="pt")
-    out = model.generate(**inputs)
-    return processor.decode(out[0], skip_special_tokens=True)
+    inputs = blip_processor(image, question, return_tensors="pt")
+    out = blip_model.generate(**inputs)
+    return blip_processor.decode(out[0], skip_special_tokens=True)
 
 def extract_frame(video_path, timestamp=1.0):
     output_path = os.path.join(UPLOAD_FOLDER, "frame.jpg")
@@ -130,7 +132,7 @@ def extract_frame(video_path, timestamp=1.0):
         return output_path
     return None
 
-# ======================= STREAMLIT UI =======================
+# ======================= Streamlit UI =======================
 
 st.title("Multimodal Q&A Chatbot")
 uploaded_file = st.file_uploader("Upload a document (PDF, DOCX, CSV, Image or Video)", type=["pdf", "docx", "csv", "jpg", "jpeg", "png", "mp4", "avi", "mov"])
@@ -138,36 +140,40 @@ question = st.text_input("Ask a question about the uploaded file:")
 
 if uploaded_file and question:
     if st.button("Ask"):
-        with st.spinner("Processing..."):
+        with st.spinner("Processing your question..."):
             ext = os.path.splitext(uploaded_file.name)[1].lower()
-
             temp_path = os.path.join(UPLOAD_FOLDER, uploaded_file.name)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.read())
 
-            if ext in [".pdf", ".docx", ".csv"]:
-                raw_text, df = extract_text(open(temp_path, "rb"), ext[1:])
-                chunks = chunk_text(raw_text)
-                index, chunks = create_index(chunks)
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.read())
 
-                if df is not None:
-                    answer = handle_structured_question(df, question) or generate_answer("\n".join(get_top_chunks(question, chunks, index)), question)
+                if ext in [".pdf", ".docx", ".csv"]:
+                    raw_text, df = extract_text(open(temp_path, "rb"), ext[1:])
+                    chunks = chunk_text(raw_text)
+                    index, chunks = create_index(chunks)
+
+                    if df is not None:
+                        answer = handle_structured_question(df, question) or generate_answer("\n".join(get_top_chunks(question, chunks, index)), question)
+                    else:
+                        context = "\n".join(get_top_chunks(question, chunks, index))
+                        answer = generate_answer(context, question)
+
+                elif ext in [".jpg", ".jpeg", ".png"]:
+                    answer = blip_answer(temp_path, question)
+
+                elif ext in [".mp4", ".avi", ".mov"]:
+                    frame_path = extract_frame(temp_path)
+                    if frame_path:
+                        answer = blip_answer(frame_path, question)
+                    else:
+                        answer = "Could not extract frame from video."
+
                 else:
-                    context = "\n".join(get_top_chunks(question, chunks, index))
-                    answer = generate_answer(context, question)
+                    answer = "Unsupported file type."
 
-            elif ext in [".jpg", ".jpeg", ".png"]:
-                answer = blip_answer(temp_path, question)
+                st.success("Answer:")
+                st.write(answer)
 
-            elif ext in [".mp4", ".avi", ".mov"]:
-                frame_path = extract_frame(temp_path)
-                if frame_path:
-                    answer = blip_answer(frame_path, question)
-                else:
-                    answer = "Could not extract frame from video."
-
-            else:
-                answer = "Unsupported file type."
-
-            st.success("Answer:")
-            st.write(answer)
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
