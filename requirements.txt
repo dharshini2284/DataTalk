@@ -1,6 +1,6 @@
 ﻿streamlit
-transformers
-torch
+transformers==4.37.2
+torch==2.1.2
 sentence-transformers
 pandas
 python-docx
