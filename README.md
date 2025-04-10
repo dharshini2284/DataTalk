@@ -1,4 +1,4 @@
-# 🤖 Multimodal Q&A Chatbot
+# 🤖 DataTalk - A Multimodal Q&A Chatbot
 
 A powerful AI chatbot that answers questions from **documents (PDF, DOCX, CSV)**, **images**, and **videos** using cutting-edge NLP and computer vision models.
 
